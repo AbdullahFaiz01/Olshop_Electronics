@@ -18,7 +18,7 @@ app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, "../public")));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-mongoose.connect("mongodb://localhost:27017/electrostore", {
+mongoose.connect("mongodb+srv://faizrusydi478_db_user:faizrusydi478_db_user@cluster0.fgsvu7u.mongodb.net/?appName=Cluster0", {
   useNewUrlParser: true,
   useUnifiedTopology: true
 });
