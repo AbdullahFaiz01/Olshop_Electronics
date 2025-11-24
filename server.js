@@ -23,31 +23,43 @@ cloudinary.config({
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-});
+mongoose.connect(process.env.MONGO_URI);
 
 const userSchema = new mongoose.Schema({
   username: String,
-  email: String,
+  email: { type: String, unique: true },
   password: String,
-  photoUrl: { type: String, default: "" }
+  photoUrl: { type: String, default: "" },
+  photoPublicId: { type: String, default: "" }
 });
+
+const orderItemSchema = new mongoose.Schema(
+  { title: String, qty: Number, price: Number },
+  { _id: false }
+);
+
+const orderSchema = new mongoose.Schema(
+  {
+    userEmail: String,
+    nama: String,
+    alamat: String,
+    telepon: String,
+    items: [orderItemSchema],
+    total: Number
+  },
+  { timestamps: true }
+);
+
 const User = mongoose.model("User", userSchema);
+const Order = mongoose.model("Order", orderSchema);
 
 app.post("/api/register", async (req, res) => {
   const { username, email, password } = req.body;
-
-  if (!username || !email || !password)
-    return res.status(400).json({ message: "Semua kolom wajib diisi!" });
-
-  if (username.length < 3)
-    return res.status(400).json({ message: "Username minimal 3 karakter!" });
+  if (!username || !email || !password) return res.status(400).json({ message: "Semua kolom wajib diisi!" });
+  if (username.length < 3) return res.status(400).json({ message: "Username minimal 3 karakter!" });
 
   const exist = await User.findOne({ email });
-  if (exist)
-    return res.status(400).json({ message: "Email sudah terdaftar" });
+  if (exist) return res.status(400).json({ message: "Email sudah terdaftar" });
 
   await new User({ username, email, password }).save();
   res.json({ message: "Registrasi berhasil!" });
@@ -55,12 +67,11 @@ app.post("/api/register", async (req, res) => {
 
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
-
   let user = await User.findOne({ email, password });
-  if (!user)
-    return res.status(401).json({ message: "Email atau password salah!" });
 
-  if (!user.username || user.username.trim() === "") {
+  if (!user) return res.status(401).json({ message: "Email atau password salah!" });
+
+  if (!user.username) {
     user.username = email.split("@")[0];
     await user.save();
   }
@@ -77,94 +88,92 @@ app.put("/api/user/update", async (req, res) => {
   const { oldEmail, newUsername, newEmail } = req.body;
   const user = await User.findOne({ email: oldEmail });
 
-  if (!user)
-    return res.status(404).json({ message: "User tidak ditemukan" });
+  if (!user) return res.status(404).json({ message: "User tidak ditemukan" });
 
-  if (newUsername && newUsername.trim().length >= 3)
-    user.username = newUsername.trim();
+  if (newUsername && newUsername.length >= 3) user.username = newUsername;
 
   if (newEmail && newEmail !== oldEmail) {
     const exist = await User.findOne({ email: newEmail });
-    if (exist)
-      return res.status(400).json({ message: "Email baru sudah dipakai!" });
+    if (exist) return res.status(400).json({ message: "Email baru sudah dipakai!" });
     user.email = newEmail;
   }
 
   await user.save();
-
-  res.json({
-    message: "Profil berhasil diperbarui!",
-    username: user.username,
-    email: user.email
-  });
+  res.json({ message: "Profil berhasil diperbarui!", username: user.username, email: user.email });
 });
 
 app.get("/api/user/:email", async (req, res) => {
   const user = await User.findOne({ email: req.params.email });
-  if (!user)
-    return res.status(404).json({ message: "User tidak ditemukan" });
+  if (!user) return res.status(404).json({ message: "User tidak ditemukan" });
+
+  const ordersCount = await Order.countDocuments({ userEmail: req.params.email });
 
   res.json({
     username: user.username,
     email: user.email,
-    orders: 0,
+    orders: ordersCount,
     photoUrl: user.photoUrl
   });
 });
 
 app.post("/api/user/photo", upload.single("photo"), async (req, res) => {
-  try {
-    const { email } = req.body;
-    const user = await User.findOne({ email });
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ message: "Email wajib diisi" });
 
-    if (!user)
-      return res.status(404).json({ message: "User tidak ditemukan" });
+  const user = await User.findOne({ email });
+  if (!user) return res.status(404).json({ message: "User tidak ditemukan" });
 
-    const uploaded = await cloudinary.uploader.upload_stream(
-      { folder: "profile_photos" },
-      async (error, result) => {
-        if (error) return res.status(500).json({ message: "Upload gagal" });
+  if (!req.file) return res.status(400).json({ message: "File foto tidak ditemukan" });
 
-        user.photoUrl = result.secure_url;
-        await user.save();
+  const stream = cloudinary.uploader.upload_stream({ folder: "profile_photos" }, async (err, result) => {
+    if (err) return res.status(500).json({ message: "Upload gagal" });
 
-        res.json({
-          message: "Upload berhasil",
-          photoUrl: result.secure_url
-        });
-      }
-    );
+    user.photoUrl = result.secure_url;
+    user.photoPublicId = result.public_id;
+    await user.save();
 
-    uploaded.end(req.file.buffer);
+    res.json({ message: "Upload berhasil", photoUrl: result.secure_url });
+  });
 
-  } catch {
-    res.status(500).json({ message: "Server error" });
-  }
+  stream.end(req.file.buffer);
 });
 
 app.delete("/api/user/photo", async (req, res) => {
-  try {
-    const { email } = req.body;
-    const user = await User.findOne({ email });
+  const { email } = req.body;
 
-    if (!user)
-      return res.status(404).json({ message: "User tidak ditemukan" });
+  const user = await User.findOne({ email });
+  if (!user) return res.status(404).json({ message: "User tidak ditemukan" });
 
-    if (user.photoUrl) {
-      const publicId = user.photoUrl.split("/").pop().split(".")[0];
-      await cloudinary.uploader.destroy("profile_photos/" + publicId);
-    }
-
-    user.photoUrl = "";
-    await user.save();
-
-    res.json({ message: "Foto profil berhasil dihapus" });
-
-  } catch {
-    res.status(500).json({ message: "Gagal menghapus foto" });
+  if (user.photoPublicId) {
+    try {
+      await cloudinary.uploader.destroy(user.photoPublicId);
+    } catch {}
   }
+
+  user.photoUrl = "";
+  user.photoPublicId = "";
+  await user.save();
+
+  res.json({ message: "Foto profil berhasil dihapus" });
 });
 
-app.listen(PORT, () =>
-  console.log(`🚀 Server running on port ${PORT}`)
-);
+app.post("/api/orders", async (req, res) => {
+  const { userEmail, nama, alamat, telepon, items, total } = req.body;
+
+  if (!userEmail || !nama || !alamat || !telepon || !items.length)
+    return res.status(400).json({ message: "Data pesanan tidak lengkap" });
+
+  const order = new Order({ userEmail, nama, alamat, telepon, items, total });
+  await order.save();
+
+  res.json({ message: "Pesanan berhasil dibuat", orderId: order._id });
+});
+
+app.get("/api/orders/:email", async (req, res) => {
+  const orders = await Order.find({ userEmail: req.params.email }).sort({ createdAt: -1 });
+  res.json(orders);
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
