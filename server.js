@@ -17,6 +17,7 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, "../public")));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/uploads/profile", express.static(path.join(__dirname, "uploads/profile")));
 
 mongoose.connect("mongodb+srv://faizrusydi478_db_user:Qb4HxOAidaNyR9vx@cluster0.fgsvu7u.mongodb.net/?appName=Cluster0", {
   useNewUrlParser: true,
@@ -127,12 +128,14 @@ app.get("/api/user/:email", async (req, res) => {
     if (!user) return res.status(404).json({ message: "User tidak ditemukan" });
 
     const orderCount = await Order.countDocuments({ userEmail: user.email });
+
     res.json({
       username: user.username,
       email: user.email,
       orders: orderCount,
       photoUrl: user.photoUrl
     });
+
   } catch {
     res.status(500).json({ message: "Terjadi kesalahan server" });
   }
