@@ -2,51 +2,30 @@ import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
 import bodyParser from "body-parser";
-import path from "path";
-import { fileURLToPath } from "url";
 import multer from "multer";
-import fs from "fs";
+import { v2 as cloudinary } from "cloudinary";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
-const PORT = 5000;
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, "../public")));
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-app.use("/uploads/profile", express.static(path.join(__dirname, "uploads/profile")));
 
-mongoose.connect("mongodb+srv://faizrusydi478_db_user:Qb4HxOAidaNyR9vx@cluster0.fgsvu7u.mongodb.net/?appName=Cluster0", {
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
+mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true
-});
-const db = mongoose.connection;
-db.on("error", console.error.bind(console, "❌ MongoDB error:"));
-db.once("open", () => console.log("✅ MongoDB Connected!"));
-
-const uploadsDir = path.join(__dirname, "uploads", "profile");
-fs.mkdirSync(uploadsDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, Date.now() + "-" + Math.round(Math.random() * 1e9) + ext);
-  }
-});
-
-const upload = multer({
-  storage,
-  fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png/;
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.test(ext)) cb(null, true);
-    else cb(new Error("File tidak valid"));
-  },
-  limits: { fileSize: 2 * 1024 * 1024 }
 });
 
 const userSchema = new mongoose.Schema({
@@ -59,6 +38,7 @@ const User = mongoose.model("User", userSchema);
 
 app.post("/api/register", async (req, res) => {
   const { username, email, password } = req.body;
+
   if (!username || !email || !password)
     return res.status(400).json({ message: "Semua kolom wajib diisi!" });
 
@@ -93,104 +73,69 @@ app.post("/api/login", async (req, res) => {
   });
 });
 
-const orderSchema = new mongoose.Schema({
-  userEmail: String,
-  nama: String,
-  alamat: String,
-  telepon: String,
-  items: Array,
-  total: Number,
-  createdAt: { type: Date, default: Date.now }
-});
-const Order = mongoose.model("Order", orderSchema);
+app.put("/api/user/update", async (req, res) => {
+  const { oldEmail, newUsername, newEmail } = req.body;
+  const user = await User.findOne({ email: oldEmail });
 
-app.post("/api/orders", async (req, res) => {
-  try {
-    await new Order(req.body).save();
-    res.json({ message: "Pembayaran Berhasil✅" });
-  } catch {
-    res.status(500).json({ message: "Terjadi kesalahan pada server." });
-  }
-});
+  if (!user)
+    return res.status(404).json({ message: "User tidak ditemukan" });
 
-app.get("/api/orders/:email", async (req, res) => {
-  try {
-    const orders = await Order.find({ userEmail: req.params.email }).sort({ createdAt: -1 });
-    res.json(orders);
-  } catch {
-    res.status(500).json({ message: "Terjadi kesalahan saat mengambil data." });
+  if (newUsername && newUsername.trim().length >= 3)
+    user.username = newUsername.trim();
+
+  if (newEmail && newEmail !== oldEmail) {
+    const exist = await User.findOne({ email: newEmail });
+    if (exist)
+      return res.status(400).json({ message: "Email baru sudah dipakai!" });
+    user.email = newEmail;
   }
+
+  await user.save();
+
+  res.json({
+    message: "Profil berhasil diperbarui!",
+    username: user.username,
+    email: user.email
+  });
 });
 
 app.get("/api/user/:email", async (req, res) => {
-  try {
-    const user = await User.findOne({ email: req.params.email });
-    if (!user) return res.status(404).json({ message: "User tidak ditemukan" });
+  const user = await User.findOne({ email: req.params.email });
+  if (!user)
+    return res.status(404).json({ message: "User tidak ditemukan" });
 
-    const orderCount = await Order.countDocuments({ userEmail: user.email });
-
-    res.json({
-      username: user.username,
-      email: user.email,
-      orders: orderCount,
-      photoUrl: user.photoUrl
-    });
-
-  } catch {
-    res.status(500).json({ message: "Terjadi kesalahan server" });
-  }
-});
-
-app.put("/api/user/update", async (req, res) => {
-  try {
-    const { oldEmail, newUsername, newEmail } = req.body;
-    const user = await User.findOne({ email: oldEmail });
-
-    if (!user)
-      return res.status(404).json({ message: "User tidak ditemukan" });
-
-    if (newUsername && newUsername.trim().length >= 3)
-      user.username = newUsername.trim();
-
-    if (newEmail && newEmail !== oldEmail) {
-      const exist = await User.findOne({ email: newEmail });
-      if (exist)
-        return res.status(400).json({ message: "Email baru sudah dipakai!" });
-      user.email = newEmail;
-    }
-
-    await user.save();
-
-    res.json({
-      message: "Profil berhasil diperbarui!",
-      username: user.username,
-      email: user.email
-    });
-
-  } catch {
-    res.status(500).json({ message: "Terjadi kesalahan server" });
-  }
+  res.json({
+    username: user.username,
+    email: user.email,
+    orders: 0,
+    photoUrl: user.photoUrl
+  });
 });
 
 app.post("/api/user/photo", upload.single("photo"), async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) return res.status(400).json({ message: "Email diperlukan" });
-
-    if (!req.file)
-      return res.status(400).json({ message: "File tidak ditemukan" });
-
     const user = await User.findOne({ email });
-    if (!user) {
-      fs.unlinkSync(req.file.path);
+
+    if (!user)
       return res.status(404).json({ message: "User tidak ditemukan" });
-    }
 
-    const photoUrl = `/uploads/profile/${req.file.filename}`;
-    user.photoUrl = photoUrl;
-    await user.save();
+    const uploaded = await cloudinary.uploader.upload_stream(
+      { folder: "profile_photos" },
+      async (error, result) => {
+        if (error) return res.status(500).json({ message: "Upload gagal" });
 
-    res.json({ message: "Upload berhasil", photoUrl });
+        user.photoUrl = result.secure_url;
+        await user.save();
+
+        res.json({
+          message: "Upload berhasil",
+          photoUrl: result.secure_url
+        });
+      }
+    );
+
+    uploaded.end(req.file.buffer);
 
   } catch {
     res.status(500).json({ message: "Server error" });
@@ -200,24 +145,26 @@ app.post("/api/user/photo", upload.single("photo"), async (req, res) => {
 app.delete("/api/user/photo", async (req, res) => {
   try {
     const { email } = req.body;
-
     const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: "User tidak ditemukan" });
+
+    if (!user)
+      return res.status(404).json({ message: "User tidak ditemukan" });
 
     if (user.photoUrl) {
-      const filePath = path.join(__dirname, "." + user.photoUrl);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      const publicId = user.photoUrl.split("/").pop().split(".")[0];
+      await cloudinary.uploader.destroy("profile_photos/" + publicId);
     }
 
     user.photoUrl = "";
     await user.save();
 
     res.json({ message: "Foto profil berhasil dihapus" });
+
   } catch {
     res.status(500).json({ message: "Gagal menghapus foto" });
   }
 });
 
 app.listen(PORT, () =>
-  console.log(`🚀 Server running at http://localhost:${PORT}`)
+  console.log(`🚀 Server running on port ${PORT}`)
 );
