@@ -137,6 +137,20 @@ app.post("/api/forgot-password", async (req, res) => {
     });
   }
 });
+app.post("/api/verify-reset-code", async (req, res) => {
+  const { email, code } = req.body;
+
+  const user = await User.findOne({ email });
+  if (!user) return res.status(404).json({ success: false, message: "Email tidak ditemukan" });
+
+  if (user.resetCode !== code)
+    return res.status(400).json({ success: false, message: "Kode OTP salah" });
+
+  if (user.resetCodeExpire < Date.now())
+    return res.status(400).json({ success: false, message: "Kode OTP telah kadaluarsa" });
+
+  res.json({ success: true, message: "OTP valid" });
+});
 
 app.post('/api/reset-password', async (req, res) => {
   const { email, code, newPassword } = req.body;
