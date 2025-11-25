@@ -1,3 +1,4 @@
+import sendMail from "./sendMail.js";
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
@@ -35,7 +36,9 @@ const userSchema = new mongoose.Schema({
   email: { type: String, unique: true },
   password: String,
   photoUrl: { type: String, default: "" },
-  photoPublicId: { type: String, default: "" }
+  photoPublicId: { type: String, default: "" },
+  resetCode: { type: String, default: null },
+  resetCodeExpire: { type: Date, default: null }
 });
 
 const orderItemSchema = new mongoose.Schema(
@@ -87,6 +90,47 @@ app.post("/api/login", async (req, res) => {
     username: user.username,
     photoUrl: user.photoUrl
   });
+});
+
+app.post("/api/forgot-password", async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findOne({ email });
+  if (!user) return res.status(404).json({ success: false, message: "Email tidak ditemukan" });
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+  user.resetCode = code;
+  user.resetCodeExpire = Date.now() + 5 * 60 * 1000; // aktif 5 menit
+  await user.save();
+
+  await sendMail({
+    to: email,
+    subject: "Reset Password - ElectroStore",
+    text: `Kode reset password Anda adalah: ${code} (berlaku 5 menit)`
+  });
+
+  res.json({ success: true, message: "Kode reset telah dikirim ke email Anda" });
+});
+
+app.post('/api/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body;
+
+  const user = await User.findOne({ email });
+  if (!user) return res.status(404).json({ success: false, message: "Email tidak ditemukan" });
+
+  if (user.resetCode !== code)
+    return res.status(400).json({ success: false, message: "Kode reset salah" });
+
+  if (user.resetCodeExpire < Date.now())
+    return res.status(400).json({ success: false, message: "Kode reset telah kadaluarsa" });
+
+  user.password = newPassword;
+  user.resetCode = null;
+  user.resetCodeExpire = null;
+  await user.save();
+
+  res.json({ success: true, message: "Password berhasil diubah" });
 });
 
 app.put("/api/user/update", async (req, res) => {
@@ -152,7 +196,7 @@ app.delete("/api/user/photo", async (req, res) => {
   if (user.photoPublicId) {
     try {
       await cloudinary.uploader.destroy(user.photoPublicId);
-    } catch {}
+    } catch { }
   }
 
   user.photoUrl = "";
