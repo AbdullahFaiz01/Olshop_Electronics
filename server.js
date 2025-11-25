@@ -105,24 +105,37 @@ app.post("/api/login", async (req, res) => {
 });
 
 app.post("/api/forgot-password", async (req, res) => {
-  const { email } = req.body;
+  try {
+    const { email } = req.body;
+    console.log("REQUEST FORGOT PASSWORD:", email);
 
-  const user = await User.findOne({ email });
-  if (!user) return res.status(404).json({ success: false, message: "Email tidak ditemukan" });
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Email tidak ditemukan" });
+    }
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-  user.resetCode = code;
-  user.resetCodeExpire = Date.now() + 5 * 60 * 1000; // aktif 5 menit
-  await user.save();
+    user.resetCode = code;
+    user.resetCodeExpire = Date.now() + 5 * 60 * 1000; // 5 menit
+    await user.save();
 
-  await sendMail({
-    to: email,
-    subject: "Reset Password - ElectroStore",
-    text: `Kode reset password Anda adalah: ${code} (berlaku 5 menit)`
-  });
+    await sendMail({
+      to: email,
+      subject: "Reset Password - ElectroStore",
+      text: `Kode reset password Anda adalah: ${code} (berlaku 5 menit)`
+    });
 
-  res.json({ success: true, message: "Kode reset telah dikirim ke email Anda" });
+    console.log("OTP terkirim ke:", email);
+
+    res.json({ success: true, message: "Kode reset telah dikirim ke email Anda" });
+  } catch (err) {
+    console.error("ERROR /api/forgot-password:", err);
+    res.status(500).json({
+      success: false,
+      message: "Terjadi kesalahan server saat mengirim email reset password"
+    });
+  }
 });
 
 app.post('/api/reset-password', async (req, res) => {
