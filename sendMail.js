@@ -1,27 +1,31 @@
-import nodemailer from "nodemailer";
+import axios from "axios";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 export default async function sendMail({ to, subject, text }) {
-  console.log("sendMail() dipanggil ke:", to);
-
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.MAIL_USER,
-      pass: process.env.MAIL_PASS
-    }
-  });
-
   try {
-    const info = await transporter.sendMail({
-      from: `ElectroStore <${process.env.MAIL_USER}>`,
-      to,
-      subject,
-      text
+    const apiKey = process.env.BREVO_API_KEY;
+
+    const payload = {
+      sender: { email: process.env.MAIL_FROM },
+      to: [{ email: to }],
+      subject: subject,
+      textContent: text
+    };
+
+    await axios.post("https://api.brevo.com/v3/smtp/email", payload, {
+      headers: {
+        "api-key": apiKey,
+        "Content-Type": "application/json"
+      }
     });
 
-    console.log("Email terkirim, messageId:", info.messageId);
+    console.log("📧 Email terkirim ke:", to);
+    return true;
+
   } catch (err) {
-    console.error("GAGAL KIRIM EMAIL:", err);
-    throw err;
+    console.error("❌ BREVO ERROR:", err.response?.data || err.message);
+    return false;
   }
 }
